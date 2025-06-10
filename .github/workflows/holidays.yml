@@ -1,0 +1,26 @@
+name: Holiday Alert
+
+on:
+  schedule:
+    # 08:00 UTC = 09:00 BST (Europe/London)
+    - cron: '0 8 * * *'
+
+jobs:
+  alert:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run holiday bot
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
+        run: python holidays_bot.py
