@@ -1,3 +1,4 @@
 requests
 apscheduler
 python-telegram-bot
+beautifulsoup4
