@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 BOT_TOKEN  = os.environ['BOT_TOKEN']
 CHANNEL_ID = os.environ['CHANNEL_ID']
 
-# 1) All Western Europe countries
+# Western Europe countries
 COUNTRIES = {
     'PT': 'Portugal',
     'ES': 'Spain',
@@ -36,17 +36,34 @@ def get_holidays(country_code: str, year: int):
 
 def check_holidays():
     today = datetime.now(ZoneInfo("Europe/London")).date()
-    for code, name in COUNTRIES.items():
+    for code, country_name in COUNTRIES.items():
         for h in get_holidays(code, today.year):
             h_date = datetime.fromisoformat(h['date']).date()
-            # 2) Exactly 2 days before
             if (h_date - today).days == 2:
-                msg = (
-                    f"📅 Holiday in {name}: "
-                    f"{h['localName']} ({h['name']}) on {h['date']} — in 2 days!"
-                )
-                send_message(msg)
-                print(f"{datetime.now()}: Sent holiday alert – {msg}")
+                # formatted date
+                formatted_date = h_date.strftime("%a %d %b %Y")
+                # determine holiday type
+                h_type = "Public holiday"
+                types = h.get("types") or []
+                if types:
+                    t = types[0].lower()
+                    if t == "bank":
+                        h_type = "Bank holiday"
+                    else:
+                        h_type = f"{types[0].capitalize()} holiday"
+                # regional notes
+                counties = h.get("counties") or []
+                region_line = f"📍 Regions: {', '.join(counties)}" if counties else ""
+                # build message
+                lines = [
+                    f"📅 {country_name} – {h['localName']}",
+                    f"🗓️ {formatted_date} | {h_type}"
+                ]
+                if region_line:
+                    lines.append(region_line)
+                message = "\n".join(lines)
+                send_message(message)
+                print(f"{datetime.now()}: Sent holiday alert – {message}")
 
 def fetch_driving_bans():
     url  = "https://truckban.eu/"
@@ -56,7 +73,7 @@ def fetch_driving_bans():
     lines = [l.strip() for l in text.splitlines()]
     start = lines.index("General driving bans by countries for the whole year")
     end   = lines.index("Latest fuel prices")
-    bans = {}
+    bans  = {}
     current = None
 
     for line in lines[start+1:end]:
@@ -68,27 +85,22 @@ def fetch_driving_bans():
         elif current:
             bans[current].append(line)
 
-    for k in bans:
-        bans[k] = " ".join(bans[k])
-
-    return bans
+    return {k: " ".join(v) for k, v in bans.items()}
 
 def check_driving_bans():
     bans = fetch_driving_bans()
-    parts = []
-    for name in COUNTRIES.values():
-        info = bans.get(name, "No general ban info found.")
-        parts.append(f"*{name}*: {info}")
-    summary = "🚚 General driving-ban rules (> 7.5 t):\n" + "\n".join(parts)
-    send_message(summary)
-    print(f"{datetime.now()}: Sent driving-ban summary")
+    for country in COUNTRIES.values():
+        info = bans.get(country, "No general ban info found.")
+        msg = f"🚚 {country} (> 7.5 t): {info}"
+        send_message(msg)
+        print(f"{datetime.now()}: Sent driving-ban for {country}")
 
 def daily_job():
     check_holidays()
     check_driving_bans()
 
 if __name__ == "__main__":
-    # Run once immediately...
+    # run once immediately…
     daily_job()
     # …then schedule every day at 09:00 Europe/London
     scheduler = BlockingScheduler(timezone=ZoneInfo("Europe/London"))
