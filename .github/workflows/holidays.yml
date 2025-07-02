@@ -28,4 +28,4 @@ jobs:
        BOT_TOKEN:       ${{ secrets.BOT_TOKEN }}
        CHANNEL_ID:      ${{ secrets.CHANNEL_ID }}
        GROUP_CHAT_ID:   ${{ secrets.GROUP_CHAT_ID }}
-     run: python holidays_bot.py
+     run: python3 holidays_bot.py
