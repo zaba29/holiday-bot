@@ -1,4 +1,5 @@
 import os
+from telegram import Bot
 import requests
 from datetime import datetime, time
 from zoneinfo import ZoneInfo
@@ -6,12 +7,11 @@ from bs4 import BeautifulSoup
 from telegram import BotCommand, Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# Hard-coded credentials for local run
-BOT_TOKEN   = '7855190653:AAHuTOvMc-0EyYj9K_KPxQfMd77b8Av4WOs'
-CHANNEL_ID  = '@wheugroup'
-GROUP_CHAT_ID = -4953278038
+# Read credentials & targets from env (or fall back for local dev)
+BOT_TOKEN     = os.environ['BOT_TOKEN']
+CHANNEL_ID    = os.environ['CHANNEL_ID']
+GROUP_CHAT_ID = int(os.environ['GROUP_CHAT_ID'])
 
-# European countries for holiday lookups
 def get_countries():
     return {
         'PT': 'Portugal', 'ES': 'Spain', 'FR': 'France', 'BE': 'Belgium',
@@ -28,87 +28,83 @@ def get_countries():
     }
 COUNTRIES = get_countries()
 
-# Fetch public holidays
-
 def get_holidays(country_code: str, year: int):
     url = f'https://date.nager.at/api/v3/PublicHolidays/{year}/{country_code}'
     r = requests.get(url)
     return r.json() if r.ok else []
 
-# Scrape driving bans summary
 def fetch_driving_bans():
-    url = 'https://truckban.eu/'
-    r = requests.get(url)
-    soup = BeautifulSoup(r.text, 'html.parser')
-    text = soup.get_text('\n')
-    lines = [l.strip() for l in text.splitlines()]
+    r = requests.get('https://truckban.eu/')
+    lines = [l.strip() for l in BeautifulSoup(r.text, 'html.parser').get_text('\n').splitlines()]
     start = lines.index('General driving bans by countries for the whole year')
     end   = lines.index('Latest fuel prices')
-    bans = {}
-    current = None
+    bans, current = {}, None
     for line in lines[start+1:end]:
-        if not line:
-            continue
+        if not line: continue
         if line in COUNTRIES.values():
             current = line
             bans[current] = []
         elif current:
             bans[current].append(line)
-    # collapse and return full text per country
-    return {country: ' '.join(info) for country, info in bans.items()}
+    return {c: ' '.join(info) for c, info in bans.items()}
 
-# /holiday command handler
 async def holiday_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     today = datetime.now(ZoneInfo('Europe/London')).date().isoformat()
     msgs = []
-    for code, name in COUNTRIES.items():
-        for h in get_holidays(code, datetime.now().year):
+    for cc, name in COUNTRIES.items():
+        for h in get_holidays(cc, datetime.now().year):
             if h['date'] == today:
                 msgs.append(f"📅 Today in {name}: {h['localName']}")
-    await update.message.reply_text('\n'.join(msgs) if msgs else 'No holidays today.')
+    await update.message.reply_text('\n'.join(msgs) or 'No holidays today.')
 
-# /drivingban command handler with simplified messages
 async def drivingban_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     bans = fetch_driving_bans()
     for country, info in bans.items():
-        # take only the first sentence to simplify
         summary = info.split('.')[0].strip() + '.'
         await update.message.reply_text(f"🚚 {country} (>7.5 t): {summary}")
 
-# Scheduled daily job
 async def scheduled_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     bot = context.bot
     today = datetime.now(ZoneInfo('Europe/London')).date().isoformat()
-    # Holiday alerts for today
-    for code, name in COUNTRIES.items():
-        for h in get_holidays(code, datetime.now().year):
+    # Holiday alerts
+    for cc, name in COUNTRIES.items():
+        for h in get_holidays(cc, datetime.now().year):
             if h['date'] == today:
                 text = f"📅 Today in {name}: {h['localName']}"
-                for cid in (CHANNEL_ID, GROUP_CHAT_ID):
-                    await bot.send_message(cid, text)
-    # Driving-ban summaries simplified
+                for chat in (CHANNEL_ID, GROUP_CHAT_ID):
+                    await bot.send_message(chat, text)
+    # Driving-ban summaries
     bans = fetch_driving_bans()
     for country, info in bans.items():
         summary = info.split('.')[0].strip() + '.'
         msg = f"🚚 {country} (>7.5 t): {summary}"
-        for cid in (CHANNEL_ID, GROUP_CHAT_ID):
-            await bot.send_message(cid, msg)
+        for chat in (CHANNEL_ID, GROUP_CHAT_ID):
+            await bot.send_message(chat, msg)
 
-# Main entrypoint
 async def main() -> None:
+    # In GitHub Actions, do one scheduled run then exit
+    if os.getenv("GITHUB_ACTIONS"):
+        ctx = type('Ctx', (), {})()
+        ctx.bot = Bot(BOT_TOKEN)
+        await scheduled_job(ctx)
+        return
+
+    # Otherwise (local), start interactive polling + schedule
     app = (ApplicationBuilder()
            .token(BOT_TOKEN)
-           .post_init(lambda bot_app: bot_app.bot.set_my_commands([
+           .post_init(lambda a: a.bot.set_my_commands([
                BotCommand('holiday', "Show today's European holidays"),
                BotCommand('drivingban', "Show driving-ban rules for >7.5 t")
            ]))
            .build())
+
     app.add_handler(CommandHandler('holiday', holiday_handler))
     app.add_handler(CommandHandler('drivingban', drivingban_handler))
-    # schedule daily at 09:00 Europe/London
+
     tz = ZoneInfo('Europe/London')
     app.job_queue.run_daily(scheduled_job, time(9, 0, tzinfo=tz))
-    print("Bot started — polling for commands...")
+
+    print("Bot started — polling for commands…")
     await app.run_polling()
 
 if __name__ == '__main__':
