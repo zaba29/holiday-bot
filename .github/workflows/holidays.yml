@@ -23,9 +23,9 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run holiday bot
-        env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
-	  GROUP_CHAT_ID:   ${{ secrets.GROUP_CHAT_ID }}
-        run: python holidays_bot.py
+   - name: Run holiday bot
+     env:
+       BOT_TOKEN:       ${{ secrets.BOT_TOKEN }}
+       CHANNEL_ID:      ${{ secrets.CHANNEL_ID }}
+       GROUP_CHAT_ID:   ${{ secrets.GROUP_CHAT_ID }}
+     run: python holidays_bot.py
